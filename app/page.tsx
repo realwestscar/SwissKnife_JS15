@@ -17,6 +17,9 @@ export default function Home() {
             <li><code>POST /api/auth/login</code></li>
             <li><code>POST /api/auth/refresh</code></li>
             <li><code>POST /api/auth/logout</code></li>
+            <li><code>POST /api/auth/forgot-password</code></li>
+            <li><code>POST /api/auth/reset-password</code></li>
+            <li><code>GET /api/auth/verify-email</code></li>
             <li><code>GET /api/users</code></li>
             <li><code>GET /api/users/[id]</code></li>
             <li><code>PATCH /api/users/[id]</code></li>
