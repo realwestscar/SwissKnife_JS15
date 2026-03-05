@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:unit": "vitest run tests/api tests/utils",
+    "test:unit": "vitest run --maxWorkers=1 tests/api tests/utils",
     "test:integration": "vitest run tests/integration",
     "type-check": "next typegen && tsc --noEmit",
     "verify": "npm run type-check && npm run lint && npm run test:unit && npm run build:verify",
