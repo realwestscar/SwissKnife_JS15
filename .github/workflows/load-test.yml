@@ -1,0 +1,23 @@
+name: load-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target base URL (e.g. https://your-preview.vercel.app)'
+        required: true
+        type: string
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run k6 smoke profile
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: tests/load/smoke.js
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || secrets.LOAD_TEST_BASE_URL }}

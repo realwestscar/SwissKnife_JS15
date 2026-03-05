@@ -1,0 +1,27 @@
+{
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "functions": {
+    "app/api/**": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  },
+  "env": [
+    "NODE_ENV",
+    "JWT_SECRET",
+    "REFRESH_TOKEN_PEPPER",
+    "JWT_EXPIRY",
+    "JWT_REFRESH_EXPIRY",
+    "DATABASE_URL",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "RATE_LIMIT_ENABLED",
+    "RATE_LIMIT_WINDOW_MS",
+    "RATE_LIMIT_MAX_REQUESTS",
+    "SENTRY_DSN",
+    "OTEL_EXPORTER_OTLP_ENDPOINT"
+  ]
+}
