@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { db, resetMockDatabase } from '@/lib/db/client';
 import { signToken } from '@/lib/auth/jwt';
 import { resetRateLimitStore } from '@/lib/middleware/rate-limit';
 import crypto from 'crypto';
 
-function createJsonRequest(url: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, unknown>, token?: string) {
+function createJsonRequest(url: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: Record<string, unknown>, token?: string) {
   return new NextRequest(url, {
     method,
     headers: {
@@ -123,7 +123,7 @@ describe('Users API', () => {
     const { PATCH: patchUser } = await import('@/app/api/users/[id]/route');
 
     const response = await patchUser(
-      createJsonRequest(`http://localhost/api/users/${user.id}`, 'PATCH', { role: 'superadmin' }, token),
+      createJsonRequest(`http://localhost/api/users/${user.id}`, 'PATCH', { name: 'x' }, token),
       { params: Promise.resolve({ id: user.id }) }
     );
     const payload = await response.json();
@@ -158,5 +158,62 @@ describe('Users API', () => {
 
     expect(adminAttempt.status).toBe(200);
     expect(adminPayload.data.role).toBe('admin');
+  });
+
+  it('returns the real target user name for GET /api/users/:id', async () => {
+    const admin = await registerUser('admin-get-name@example.com', 'Admin Name', 'StrongPassword123!');
+    const member = await registerUser('member-get-name@example.com', 'Real Person Name', 'StrongPassword123!');
+    await db.updateUser(admin.id, { role: 'admin' });
+    const token = await createAccessToken(admin.id);
+    const { GET: getUserById } = await import('@/app/api/users/[id]/route');
+
+    const response = await getUserById(createJsonRequest(`http://localhost/api/users/${member.id}`, 'GET', undefined, token), {
+      params: Promise.resolve({ id: member.id }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.data.name).toBe('Real Person Name');
+    expect(payload.data.name).not.toBe('User');
+  });
+
+  it('allows admin to promote a user to superadmin', async () => {
+    const admin = await registerUser('admin-promote@example.com', 'Admin Promote', 'StrongPassword123!');
+    const member = await registerUser('member-promote@example.com', 'Member Promote', 'StrongPassword123!');
+    await db.updateUser(admin.id, { role: 'admin' });
+    const adminToken = await createAccessToken(admin.id);
+    const { PATCH: patchUser } = await import('@/app/api/users/[id]/route');
+
+    const response = await patchUser(
+      createJsonRequest(`http://localhost/api/users/${member.id}`, 'PATCH', { role: 'superadmin' }, adminToken),
+      { params: Promise.resolve({ id: member.id }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.data.role).toBe('superadmin');
+  });
+
+  it('writes an audit log with correct actor and target on DELETE /api/users/:id', async () => {
+    const admin = await registerUser('admin-delete@example.com', 'Admin Delete', 'StrongPassword123!');
+    const member = await registerUser('member-delete@example.com', 'Member Delete', 'StrongPassword123!');
+    await db.updateUser(admin.id, { role: 'admin' });
+    const adminToken = await createAccessToken(admin.id);
+    const { DELETE: deleteUser } = await import('@/app/api/users/[id]/route');
+
+    const auditSpy = vi.spyOn(db, 'createAuditLog');
+    const response = await deleteUser(
+      createJsonRequest(`http://localhost/api/users/${member.id}`, 'DELETE', undefined, adminToken),
+      { params: Promise.resolve({ id: member.id }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(auditSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: member.id,
+        actorUserId: admin.id,
+        eventType: 'users.deleted',
+      })
+    );
   });
 });

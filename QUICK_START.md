@@ -13,6 +13,7 @@ cp .env.example .env.local
 
 ## 3) Run
 ```bash
+docker compose up -d
 corepack pnpm db:migrate
 corepack pnpm dev
 ```

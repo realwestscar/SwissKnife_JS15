@@ -33,6 +33,7 @@ function buildAccessTokenPayload(user: DatabaseUser, sessionId: string) {
   return {
     sub: user.id,
     email: user.email,
+    name: user.name,
     role: user.role,
     status: user.status,
     type: 'access',

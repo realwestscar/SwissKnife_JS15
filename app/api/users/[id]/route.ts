@@ -179,12 +179,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     logger.info('Deleting user', { userId: id }, requestId);
 
-    // Delete user
-    const deleted = await db.deleteUser(id);
-    if (!deleted) {
-      throw new NotFoundError('User not found');
-    }
-
     await db.createAuditLog({
       userId: id,
       actorUserId: user.id,
@@ -198,6 +192,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
         deletedUserRole: targetUser.role,
       },
     });
+
+    // Delete user
+    const deleted = await db.deleteUser(id);
+    if (!deleted) {
+      throw new NotFoundError('User not found');
+    }
 
     return successResponse({ message: 'User deleted successfully' }, 200, requestId);
   } catch (error) {
