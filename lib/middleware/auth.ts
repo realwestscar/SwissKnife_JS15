@@ -17,21 +17,18 @@ export async function extractUser(request: NextRequest): Promise<User | null> {
     payload.type !== 'access' ||
     typeof payload.sub !== 'string' ||
     typeof payload.email !== 'string' ||
+    typeof payload.name !== 'string' ||
     typeof payload.sid !== 'string'
   ) {
     throw new AuthenticationError('Invalid token payload');
   }
 
-  const issuedAt = typeof payload.iat === 'number' ? new Date(payload.iat * 1000) : new Date();
-
   return {
     id: payload.sub,
     email: payload.email,
-    name: 'User',
+    name: payload.name,
     role: (payload.role as User['role']) || 'user',
     status: (payload.status as User['status']) || 'active',
-    createdAt: issuedAt,
-    updatedAt: issuedAt,
   };
 }
 
@@ -50,5 +47,11 @@ export function requireRole(user: User, ...roles: User['role'][]): void {
 export function requireActiveStatus(user: User): void {
   if (user.status !== 'active') {
     throw new AuthorizationError(`Account is ${user.status}`);
+  }
+}
+
+export function requireVerified(user: User): void {
+  if (!user.emailVerifiedAt) {
+    throw new AuthorizationError('Email verification required');
   }
 }

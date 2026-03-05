@@ -4,8 +4,9 @@ export interface User {
   name: string;
   role: 'user' | 'admin' | 'superadmin';
   status: 'active' | 'inactive' | 'suspended';
-  createdAt: Date;
-  updatedAt: Date;
+  emailVerifiedAt?: Date | null;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export interface ApiResponse<T = unknown> {

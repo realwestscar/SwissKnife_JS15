@@ -2,7 +2,7 @@
 
 SwissKnife is a backend-first Next.js 15 starter for production-ready API foundations: authentication, user/session management, and adapter-driven infrastructure integrations that can run with strict production dependencies or local in-memory fallbacks.
 
-![Next.js 15](https://img.shields.io/badge/Next.js-15-black) ![Postgres](https://img.shields.io/badge/Postgres-16-blue) ![Redis](https://img.shields.io/badge/Redis-7-red) ![Inngest](https://img.shields.io/badge/Inngest-Ready-purple) ![Resend](https://img.shields.io/badge/Resend-Ready-orange) ![S3](https://img.shields.io/badge/S3-Ready-green) ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-1f9d55)
+![Next.js 15](https://img.shields.io/badge/Next.js-15-black) ![Postgres](https://img.shields.io/badge/Postgres-16-blue) ![Redis](https://img.shields.io/badge/Redis-7-red) ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-1f9d55)
 
 ## Quick start
 

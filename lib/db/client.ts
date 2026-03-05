@@ -2,82 +2,44 @@ import crypto from 'crypto';
 import { and, count, desc, eq, ilike, isNull, or } from 'drizzle-orm';
 import { env } from '@/lib/config/env';
 import { checkDatabaseHealth, getDrizzleClient } from '@/lib/db/connection';
-import { auditLogs, sessions, users, type AuditLogRow, type SessionRow, type UserRow } from '@/lib/db/schema';
+import {
+  auditLogs,
+  emailVerificationTokens,
+  passwordResetTokens,
+  sessions,
+  users,
+  type AuditLogRow,
+  type EmailVerificationTokenRow,
+  type PasswordResetTokenRow,
+  type SessionRow,
+  type UserRow,
+} from '@/lib/db/schema';
+import {
+  type AuditLogInput,
+  type CreateSessionInput,
+  type DatabaseClient,
+  type DatabaseUser,
+  type EmailVerificationTokenRecord,
+  type PasswordResetTokenRecord,
+  type RotateSessionInput,
+  type SessionRecord,
+} from '@/lib/types/db';
 import { logger } from '@/lib/utils/logger';
-import { type User } from '@/lib/types';
 
-export interface DatabaseUser extends User {
-  passwordHash: string;
-}
-
-export interface SessionRecord {
-  id: string;
-  userId: string;
-  familyId: string;
-  parentSessionId: string | null;
-  refreshTokenHash: string;
-  refreshTokenJti: string;
-  ipAddress: string | null;
-  userAgent: string | null;
-  replacedBySessionId: string | null;
-  revokedAt: Date | null;
-  reuseDetectedAt: Date | null;
-  expiresAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface CreateSessionInput {
-  id: string;
-  userId: string;
-  familyId: string;
-  parentSessionId?: string | null;
-  refreshTokenHash: string;
-  refreshTokenJti: string;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-  expiresAt: Date;
-}
-
-export interface RotateSessionInput {
-  currentSessionId: string;
-  replacement: CreateSessionInput;
-}
-
-export interface AuditLogInput {
-  userId?: string | null;
-  actorUserId?: string | null;
-  eventType: string;
-  severity?: 'info' | 'warn' | 'error';
-  requestId?: string | null;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-  metadata?: Record<string, unknown> | null;
-}
+export type {
+  AuditLogInput,
+  CreateSessionInput,
+  DatabaseClient,
+  DatabaseUser,
+  EmailVerificationTokenRecord,
+  PasswordResetTokenRecord,
+  RotateSessionInput,
+  SessionRecord,
+} from '@/lib/types/db';
 
 interface UserListResult {
   users: DatabaseUser[];
   total: number;
-}
-
-interface DatabaseClient {
-  initialize(): Promise<void>;
-  healthCheck(): Promise<boolean>;
-  findUserByEmail(email: string): Promise<DatabaseUser | null>;
-  findUserById(id: string): Promise<DatabaseUser | null>;
-  createUser(user: Omit<DatabaseUser, 'id' | 'createdAt' | 'updatedAt'>): Promise<DatabaseUser>;
-  updateUser(id: string, updates: Partial<Omit<DatabaseUser, 'id' | 'createdAt'>>): Promise<DatabaseUser | null>;
-  deleteUser(id: string): Promise<boolean>;
-  getAllUsers(page?: number, limit?: number): Promise<UserListResult>;
-  searchUsers(query: string, page?: number, limit?: number): Promise<UserListResult>;
-  createSession(session: CreateSessionInput): Promise<SessionRecord>;
-  findSessionById(sessionId: string): Promise<SessionRecord | null>;
-  rotateSession(input: RotateSessionInput): Promise<SessionRecord>;
-  revokeSession(sessionId: string): Promise<boolean>;
-  revokeSessionFamily(familyId: string): Promise<number>;
-  markSessionReuseDetected(sessionId: string): Promise<void>;
-  createAuditLog(log: AuditLogInput): Promise<void>;
-  reset(): Promise<void>;
 }
 
 function mapUserRow(row: UserRow): DatabaseUser {
@@ -88,6 +50,7 @@ function mapUserRow(row: UserRow): DatabaseUser {
     passwordHash: row.passwordHash,
     role: row.role,
     status: row.status,
+    emailVerifiedAt: row.emailVerifiedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -109,6 +72,26 @@ function mapSessionRow(row: SessionRow): SessionRecord {
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function mapPasswordResetTokenRow(row: PasswordResetTokenRow): PasswordResetTokenRecord {
+  return {
+    tokenHash: row.tokenHash,
+    userId: row.userId,
+    expiresAt: row.expiresAt,
+    usedAt: row.usedAt,
+    createdAt: row.createdAt,
+  };
+}
+
+function mapEmailVerificationTokenRow(row: EmailVerificationTokenRow): EmailVerificationTokenRecord {
+  return {
+    tokenHash: row.tokenHash,
+    userId: row.userId,
+    expiresAt: row.expiresAt,
+    usedAt: row.usedAt,
+    createdAt: row.createdAt,
   };
 }
 
@@ -149,7 +132,7 @@ class PostgresDatabase implements DatabaseClient {
     return result ? mapUserRow(result) : null;
   }
 
-  async createUser(user: Omit<DatabaseUser, 'id' | 'createdAt' | 'updatedAt'>): Promise<DatabaseUser> {
+  async createUser(user: Omit<DatabaseUser, 'id' | 'createdAt' | 'updatedAt' | 'emailVerifiedAt'>): Promise<DatabaseUser> {
     const drizzle = getDrizzleClient();
     const now = new Date();
     const id = crypto.randomUUID();
@@ -316,12 +299,82 @@ class PostgresDatabase implements DatabaseClient {
     return revoked.length;
   }
 
+  async revokeAllSessionsForUser(userId: string): Promise<number> {
+    const drizzle = getDrizzleClient();
+    const revoked = await drizzle
+      .update(sessions)
+      .set({ revokedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+
+    return revoked.length;
+  }
+
   async markSessionReuseDetected(sessionId: string): Promise<void> {
     const drizzle = getDrizzleClient();
     await drizzle
       .update(sessions)
       .set({ reuseDetectedAt: new Date(), updatedAt: new Date() })
       .where(eq(sessions.id, sessionId));
+  }
+
+  async createPasswordResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    const drizzle = getDrizzleClient();
+    await drizzle.insert(passwordResetTokens).values({
+      tokenHash,
+      userId,
+      expiresAt,
+      createdAt: new Date(),
+      usedAt: null,
+    });
+  }
+
+  async findPasswordResetToken(tokenHash: string): Promise<PasswordResetTokenRecord | null> {
+    const drizzle = getDrizzleClient();
+    const [token] = await drizzle.select().from(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, tokenHash)).limit(1);
+    return token ? mapPasswordResetTokenRow(token) : null;
+  }
+
+  async markPasswordResetTokenUsed(tokenHash: string): Promise<void> {
+    const drizzle = getDrizzleClient();
+    await drizzle
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.tokenHash, tokenHash));
+  }
+
+  async createEmailVerificationToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    const drizzle = getDrizzleClient();
+    await drizzle.insert(emailVerificationTokens).values({
+      tokenHash,
+      userId,
+      expiresAt,
+      createdAt: new Date(),
+      usedAt: null,
+    });
+  }
+
+  async findEmailVerificationToken(tokenHash: string): Promise<EmailVerificationTokenRecord | null> {
+    const drizzle = getDrizzleClient();
+    const [token] = await drizzle
+      .select()
+      .from(emailVerificationTokens)
+      .where(eq(emailVerificationTokens.tokenHash, tokenHash))
+      .limit(1);
+    return token ? mapEmailVerificationTokenRow(token) : null;
+  }
+
+  async markEmailVerificationTokenUsed(tokenHash: string): Promise<void> {
+    const drizzle = getDrizzleClient();
+    await drizzle
+      .update(emailVerificationTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(emailVerificationTokens.tokenHash, tokenHash));
+  }
+
+  async markEmailVerified(userId: string): Promise<void> {
+    const drizzle = getDrizzleClient();
+    await drizzle.update(users).set({ emailVerifiedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, userId));
   }
 
   async createAuditLog(log: AuditLogInput): Promise<void> {
@@ -348,6 +401,8 @@ class PostgresDatabase implements DatabaseClient {
     const drizzle = getDrizzleClient();
     await drizzle.delete(auditLogs);
     await drizzle.delete(sessions);
+    await drizzle.delete(passwordResetTokens);
+    await drizzle.delete(emailVerificationTokens);
     await drizzle.delete(users);
   }
 }
@@ -356,6 +411,8 @@ class InMemoryDatabase implements DatabaseClient {
   private users = new Map<string, DatabaseUser>();
   private usersByEmail = new Map<string, string>();
   private sessions = new Map<string, SessionRecord>();
+  private passwordResetTokens = new Map<string, PasswordResetTokenRecord>();
+  private emailVerificationTokens = new Map<string, EmailVerificationTokenRecord>();
   private auditTrail: AuditLogRow[] = [];
 
   async initialize(): Promise<void> {}
@@ -373,12 +430,13 @@ class InMemoryDatabase implements DatabaseClient {
     return this.users.get(id) ?? null;
   }
 
-  async createUser(user: Omit<DatabaseUser, 'id' | 'createdAt' | 'updatedAt'>): Promise<DatabaseUser> {
+  async createUser(user: Omit<DatabaseUser, 'id' | 'createdAt' | 'updatedAt' | 'emailVerifiedAt'>): Promise<DatabaseUser> {
     const now = new Date();
     const created: DatabaseUser = {
       ...user,
       id: crypto.randomUUID(),
       email: normalizeEmail(user.email),
+      emailVerifiedAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -457,12 +515,14 @@ class InMemoryDatabase implements DatabaseClient {
 
   async rotateSession(input: RotateSessionInput): Promise<SessionRecord> {
     const current = this.sessions.get(input.currentSessionId);
-    if (current && !current.revokedAt) {
-      current.revokedAt = new Date();
-      current.replacedBySessionId = input.replacement.id;
-      current.updatedAt = new Date();
-      this.sessions.set(current.id, current);
+    if (!current || current.revokedAt) {
+      throw new Error('Session was already rotated or revoked');
     }
+
+    current.revokedAt = new Date();
+    current.replacedBySessionId = input.replacement.id;
+    current.updatedAt = new Date();
+    this.sessions.set(current.id, current);
 
     return this.createSession(input.replacement);
   }
@@ -492,6 +552,19 @@ class InMemoryDatabase implements DatabaseClient {
     return revoked;
   }
 
+  async revokeAllSessionsForUser(userId: string): Promise<number> {
+    let revoked = 0;
+    for (const session of this.sessions.values()) {
+      if (session.userId === userId && !session.revokedAt) {
+        session.revokedAt = new Date();
+        session.updatedAt = new Date();
+        this.sessions.set(session.id, session);
+        revoked++;
+      }
+    }
+    return revoked;
+  }
+
   async markSessionReuseDetected(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -500,6 +573,62 @@ class InMemoryDatabase implements DatabaseClient {
     session.reuseDetectedAt = new Date();
     session.updatedAt = new Date();
     this.sessions.set(sessionId, session);
+  }
+
+  async createPasswordResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    this.passwordResetTokens.set(tokenHash, {
+      tokenHash,
+      userId,
+      expiresAt,
+      usedAt: null,
+      createdAt: new Date(),
+    });
+  }
+
+  async findPasswordResetToken(tokenHash: string): Promise<PasswordResetTokenRecord | null> {
+    return this.passwordResetTokens.get(tokenHash) ?? null;
+  }
+
+  async markPasswordResetTokenUsed(tokenHash: string): Promise<void> {
+    const token = this.passwordResetTokens.get(tokenHash);
+    if (!token) {
+      return;
+    }
+    token.usedAt = new Date();
+    this.passwordResetTokens.set(tokenHash, token);
+  }
+
+  async createEmailVerificationToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
+    this.emailVerificationTokens.set(tokenHash, {
+      tokenHash,
+      userId,
+      expiresAt,
+      usedAt: null,
+      createdAt: new Date(),
+    });
+  }
+
+  async findEmailVerificationToken(tokenHash: string): Promise<EmailVerificationTokenRecord | null> {
+    return this.emailVerificationTokens.get(tokenHash) ?? null;
+  }
+
+  async markEmailVerificationTokenUsed(tokenHash: string): Promise<void> {
+    const token = this.emailVerificationTokens.get(tokenHash);
+    if (!token) {
+      return;
+    }
+    token.usedAt = new Date();
+    this.emailVerificationTokens.set(tokenHash, token);
+  }
+
+  async markEmailVerified(userId: string): Promise<void> {
+    const user = this.users.get(userId);
+    if (!user) {
+      return;
+    }
+    user.emailVerifiedAt = new Date();
+    user.updatedAt = new Date();
+    this.users.set(user.id, user);
   }
 
   async createAuditLog(log: AuditLogInput): Promise<void> {
@@ -521,6 +650,8 @@ class InMemoryDatabase implements DatabaseClient {
     this.users.clear();
     this.usersByEmail.clear();
     this.sessions.clear();
+    this.passwordResetTokens.clear();
+    this.emailVerificationTokens.clear();
     this.auditTrail = [];
   }
 }
@@ -542,3 +673,4 @@ export async function resetMockDatabase() {
 db.initialize().catch((error) => {
   logger.error('Database initialization failed', { error: error instanceof Error ? error.message : String(error) });
 });
+

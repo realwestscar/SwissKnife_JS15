@@ -44,6 +44,12 @@ function getLimiter(windowMs: number, maxRequests: number): Ratelimit {
 
 function checkRateLimitInMemory(identifier: string, windowMs: number, maxRequests: number) {
   const now = Date.now();
+  for (const [key, record] of inMemoryStore.entries()) {
+    if (now > record.resetTime) {
+      inMemoryStore.delete(key);
+    }
+  }
+
   const existing = inMemoryStore.get(identifier);
   if (!existing || now > existing.resetTime) {
     inMemoryStore.set(identifier, { count: 1, resetTime: now + windowMs });
